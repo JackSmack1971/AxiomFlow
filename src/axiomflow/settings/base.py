@@ -14,6 +14,12 @@ Attributes:
     INSTALLED_APPS (list[str]): Core Django applications.
     MIDDLEWARE (list[str]): Default middleware stack.
     TEMPLATES (list[dict]): Template engine configuration.
+    LOGGING (dict): Structured logging with correlation IDs.
+
+Structured logging emits JSON to stdout for container compatibility. The
+``CorrelationIdMiddleware`` reads an ``X-Request-ID`` header or generates a UUID
+and stores it in a context variable. ``CorrelationIdFilter`` attaches this value
+to each log record so requests can be traced across services.
 """
 
 from pathlib import Path
