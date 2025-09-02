@@ -1,114 +1,62 @@
-"""Application configuration loader.
+"""Simple application configuration loader.
 
-This module provides the :class:`Config` class which reads settings from
-``configs/orchestrator.yaml`` and environment variables prefixed with
-``ORCHESTRATOR_``. It also exposes helpers for retrieving a cached settings
-instance and injecting the values into Django's settings module at startup.
+This module exposes the :class:`Config` class which reads settings from a
+YAML file and applies overrides from environment variables. Environment
+variables take precedence over values defined in the YAML file.
 
 Example:
-    >>> from axiomflow.core.config import get_settings, setup_django_settings
-    >>> settings = get_settings()
-    >>> settings.workflow_timeout
-    300
+    >>> from pathlib import Path
+    >>> from axiomflow.core.config import Config
+    >>> cfg = Config.load(Path('configs/example.yaml'), env_prefix='APP_')
+    >>> cfg.get('debug')
+    '1'
 """
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Any, Dict
 
 import yaml
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class RoutingPolicy(BaseModel):
-    """Route tasks to specific agents."""
+@dataclass
+class Config:
+    """Application configuration with environment variable overrides.
 
-    task: str
-    agent: str
-
-
-class Config(BaseSettings):
-    """Runtime configuration for the orchestrator.
-
-    Settings are loaded from ``configs/orchestrator.yaml`` and may be
-    overridden by environment variables prefixed with ``ORCHESTRATOR_``.
+    The configuration is loaded from a YAML file. Environment variables with
+    a matching prefix override values defined in the file. Keys are treated in
+    a case-insensitive manner.
 
     Attributes:
-        workflow_timeout: Maximum seconds a workflow may run.
-        default_agent: Agent used when none specified.
-        routing_policies: Task to agent routing rules.
-        api_key: API key for external services.
+        data: Mapping of configuration keys to their resolved values.
     """
 
-    workflow_timeout: int = Field(300, gt=0)
-    default_agent: str = "coder"
-    routing_policies: List[RoutingPolicy] = Field(default_factory=list)
-    api_key: str | None = None
-
-    model_config = SettingsConfigDict(env_prefix="ORCHESTRATOR_", extra="ignore")
+    data: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: Path | None = None) -> "Config":
-        """Load configuration from YAML and environment variables.
+    def load(cls, path: Path, env_prefix: str = "") -> "Config":
+        """Load configuration from ``path`` applying environment overrides."""
 
-        Args:
-            path: Optional path to the orchestrator YAML file. Defaults to
-                ``configs/orchestrator.yaml``.
-
-        Returns:
-            Parsed and validated ``Config`` instance.
-        """
-
-        if path is None:
-            path = Path(__file__).resolve().parents[3] / "configs" / "orchestrator.yaml"
-
-        data: dict[str, object] = {}
+        data: Dict[str, Any] = {}
         if path.exists():
-            raw = path.read_text()
-            expanded = os.path.expandvars(raw)
-            data = yaml.safe_load(expanded).get("orchestrator", {})
+            data = yaml.safe_load(path.read_text()) or {}
 
-        return cls(**data)
+        prefix = env_prefix.upper()
+        for key, value in os.environ.items():
+            if prefix and not key.startswith(prefix):
+                continue
+            cfg_key = key[len(prefix) :].lower() if prefix else key.lower()
+            data[cfg_key] = value
 
+        return cls(data)
 
-_settings: Config | None = None
+    def get(self, key: str, default: Any | None = None) -> Any:
+        """Return the value for ``key`` or ``default`` if missing."""
 
-
-def get_settings() -> Config:
-    """Return a cached :class:`Config` instance.
-
-    Returns:
-        The loaded settings object.
-    """
-
-    global _settings
-    if _settings is None:
-        _settings = Config.load()
-    return _settings
+        return self.data.get(key, default)
 
 
-def setup_django_settings(django_settings) -> Config:
-    """Inject orchestrator settings into a Django settings module.
-
-    Args:
-        django_settings: The Django settings module to mutate.
-
-    Returns:
-        The loaded ``Config`` instance.
-    """
-
-    cfg = get_settings()
-    django_settings.ORCHESTRATOR_WORKFLOW_TIMEOUT = cfg.workflow_timeout
-    django_settings.ORCHESTRATOR_DEFAULT_AGENT = cfg.default_agent
-    django_settings.ORCHESTRATOR_ROUTING_POLICIES = [
-        policy.model_dump() for policy in cfg.routing_policies
-    ]
-    if cfg.api_key is not None:
-        django_settings.ORCHESTRATOR_API_KEY = cfg.api_key
-    return cfg
-
-
-__all__ = ["Config", "RoutingPolicy", "get_settings", "setup_django_settings"]
+__all__ = ["Config"]
