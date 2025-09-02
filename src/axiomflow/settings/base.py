@@ -115,6 +115,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "axiomflow.middleware.CorrelationIdMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -138,3 +139,29 @@ TEMPLATES = [
         },
     }
 ]
+
+
+# Structured logging configuration.
+
+# The ``CorrelationIdMiddleware`` extracts an ``X-Request-ID`` header from each
+# incoming HTTP request, generating a UUID when the header is absent. The value
+# is stored in a context variable so that :class:`axiomflow.logging.CorrelationIdFilter`
+# can attach it to every log record as ``correlation_id``. Logs are rendered by
+# ``JsonFormatter`` and emitted to stdout in JSON format, ensuring container
+# compatibility and request tracing across services.
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {"correlation_id": {"()": "axiomflow.logging.CorrelationIdFilter"}},
+    "formatters": {"json": {"()": "axiomflow.logging.JsonFormatter"}},
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "json",
+            "filters": ["correlation_id"],
+        }
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+}
