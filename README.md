@@ -302,6 +302,19 @@ pnpm lint --fix && pnpm format
 uv run bandit -r src/ && pnpm audit
 ```
 
+### Configuration
+
+Configuration values are defined in YAML and may be overridden by environment
+variables. Environment variables take precedence over values in the YAML file.
+
+```python
+from pathlib import Path
+from axiomflow.core.config import Config
+
+cfg = Config.load(Path("configs/orchestrator.yaml"), env_prefix="ORCHESTRATOR_")
+timeout = cfg.get("workflow_timeout")
+```
+
 ## 📖 Documentation
 
 - 📋 **[Product Requirements Document (PRD)](docs/prd.md)** - Complete product vision and requirements
