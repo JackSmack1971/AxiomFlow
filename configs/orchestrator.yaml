@@ -1,0 +1,12 @@
+# Orchestrator configuration
+# API credentials and other secrets are supplied via environment variables.
+# For example, set ORCHESTRATOR_API_KEY in your shell before starting the service.
+orchestrator:
+  workflow_timeout: 300  # seconds before a workflow times out
+  default_agent: coder  # default agent used when none specified
+  routing_policies:
+    - task: code_review
+      agent: reviewer
+    - task: test_execution
+      agent: tester
+  api_key: ${ORCHESTRATOR_API_KEY}  # provided via environment variable
