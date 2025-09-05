@@ -5,20 +5,42 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import logging
 from pathlib import Path
 from typing import Any, Iterable
-from urllib import request
+
+import requests
+
+_pypi_cache: dict[str, bool] = {}
 
 
 def _check_pypi(package: str) -> bool:
     """Return True if the given package exists on PyPI."""
-    try:
-        with request.urlopen(
-            f"https://pypi.org/pypi/{package}/json", timeout=2
-        ) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    if package in _pypi_cache:
+        return _pypi_cache[package]
+
+    url = f"https://pypi.org/pypi/{package}/json"
+    logger = logging.getLogger(__name__)
+    available = False
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, timeout=2)
+            available = resp.status_code == 200
+            break
+        except requests.Timeout as exc:
+            logger.warning(
+                "Timeout checking %s on PyPI: %s", package, exc.__class__.__name__
+            )
+            if attempt == 2:
+                break
+        except requests.RequestException as exc:
+            logger.warning(
+                "Error checking %s on PyPI: %s", package, exc.__class__.__name__
+            )
+            break
+
+    _pypi_cache[package] = available
+    return available
 
 
 def _is_deprecated(obj: Any) -> bool:
@@ -38,6 +60,7 @@ def pf01_validate_apis(paths: Iterable[str | Path]) -> dict[str, Any]:
     Returns:
         Dictionary containing compatibility report, unknown symbols and deprecated symbols.
     """
+    _pypi_cache.clear()
     packages: dict[str, dict[str, bool]] = {}
     symbols: dict[str, dict[str, dict[str, bool]]] = {}
     unknown_symbols: set[str] = set()
