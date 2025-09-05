@@ -39,6 +39,7 @@ class WorkflowParser:
         workflow = data["workflow"]
         self._validate_schema(workflow)
         self._validate_semantics(workflow)
+        workflow["estimates"] = self._estimate_resources(workflow)
         logger.debug("Workflow parsed successfully")
         return workflow
 
@@ -135,3 +136,19 @@ class WorkflowParser:
 
         for start in list(graph):
             visit(start)
+
+    def _estimate_resources(self, workflow: Dict[str, Any]) -> Dict[str, float]:
+        """Compute aggregate runtime and cost estimates for a workflow.
+
+        Args:
+            workflow: Workflow dictionary.
+
+        Returns:
+            Dictionary containing total ``runtime`` and ``cost`` estimates.
+        """
+        runtime = 0.0
+        cost = 0.0
+        for step in workflow.get("steps", []):
+            runtime += float(step.get("estimated_runtime", 0.0))
+            cost += float(step.get("estimated_cost", 0.0))
+        return {"runtime": runtime, "cost": cost}
