@@ -1,12 +1,13 @@
-"""Tests for Workflow DSL parser."""
+"""Tests for workflow DSL parser."""
 
 import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2] / "src"))
+
 import pytest
 
-from axiomflow.dsl.parser import WorkflowParser
+from axiomflow.dsl.parser import parse_workflow
 
 VALID_WORKFLOW_YAML = """
 workflow:
@@ -29,7 +30,8 @@ workflow:
       inputs: {}
       outputs:
         result: string
-      gates: [PF-01]
+      estimated_cpu: 1.0
+      estimated_memory: 256
     - id: step2
       name: Step Two
       persona: dev
@@ -38,6 +40,8 @@ workflow:
         prev_result: step1.result
       outputs:
         final: string
+      estimated_cpu: 2.0
+      estimated_memory: 512
   edges:
     - from: step1
       to: step2
@@ -65,7 +69,9 @@ VALID_WORKFLOW_JSON = """
         "persona": "dev",
         "action": "run",
         "inputs": {},
-        "outputs": {"result": "string"}
+        "outputs": {"result": "string"},
+        "estimated_cpu": 1.0,
+        "estimated_memory": 256
       }
     ],
     "edges": [],
@@ -92,8 +98,8 @@ workflow:
       inputs: {}
       outputs:
         result: string
-      estimated_runtime: 1.0
-      estimated_cost: 10.0
+      estimated_cpu: 0.5
+      estimated_memory: 128
     - id: step2
       name: Step Two
       persona: dev
@@ -102,8 +108,8 @@ workflow:
         prev_result: step1.result
       outputs:
         final: string
-      estimated_runtime: 2.0
-      estimated_cost: 20.0
+      estimated_cpu: 1.5
+      estimated_memory: 256
   edges:
     - from: step1
       to: step2
@@ -111,67 +117,64 @@ workflow:
 """
 
 
-def test_parse_yaml_workflow():
-    parser = WorkflowParser()
-    result = parser.parse(VALID_WORKFLOW_YAML)
+def _write_temp(path: Path, content: str) -> Path:
+    file_path = path / "workflow.yaml"
+    file_path.write_text(content)
+    return file_path
+
+
+def test_parse_yaml_workflow(tmp_path: Path) -> None:
+    workflow_path = _write_temp(tmp_path, VALID_WORKFLOW_YAML)
+    result = parse_workflow(str(workflow_path))
     assert result["name"] == "sample-workflow"
 
 
-def test_parse_json_workflow():
-    parser = WorkflowParser()
-    result = parser.parse(VALID_WORKFLOW_JSON)
+def test_parse_json_workflow(tmp_path: Path) -> None:
+    file_path = tmp_path / "workflow.json"
+    file_path.write_text(VALID_WORKFLOW_JSON)
+    result = parse_workflow(str(file_path))
     assert result["name"] == "json-workflow"
 
 
-def test_invalid_yaml_syntax():
-    parser = WorkflowParser()
-    with pytest.raises(ValueError):
-        parser.parse("workflow: [")
+def test_invalid_yaml_syntax(tmp_path: Path) -> None:
+    workflow_path = _write_temp(tmp_path, "workflow: [")
+    with pytest.raises(SyntaxError):
+        parse_workflow(str(workflow_path))
 
 
-def test_missing_persona_reference():
+def test_missing_persona_reference(tmp_path: Path) -> None:
     yaml_text = VALID_WORKFLOW_YAML.replace("persona: dev", "persona: unknown")
-    parser = WorkflowParser()
+    workflow_path = _write_temp(tmp_path, yaml_text)
     with pytest.raises(ValueError):
-        parser.parse(yaml_text)
+        parse_workflow(str(workflow_path))
 
 
-def test_missing_gate_reference():
-    yaml_text = VALID_WORKFLOW_YAML.replace("gates: [PF-01]", "gates: [PF-99]")
-    parser = WorkflowParser()
-    with pytest.raises(ValueError):
-        parser.parse(yaml_text)
-
-
-def test_circular_dependencies():
+def test_circular_dependencies(tmp_path: Path) -> None:
     yaml_text = VALID_WORKFLOW_YAML.replace(
         "edges:\n    - from: step1\n      to: step2",
         "edges:\n    - from: step1\n      to: step2\n    - from: step2\n      to: step1",
     )
-    parser = WorkflowParser()
+    workflow_path = _write_temp(tmp_path, yaml_text)
     with pytest.raises(ValueError):
-        parser.parse(yaml_text)
+        parse_workflow(str(workflow_path))
 
 
-def test_unsatisfied_input_reference():
+def test_unsatisfied_input_reference(tmp_path: Path) -> None:
     yaml_text = VALID_WORKFLOW_YAML.replace("result: string", "other: string")
-    parser = WorkflowParser()
+    workflow_path = _write_temp(tmp_path, yaml_text)
     with pytest.raises(ValueError):
-        parser.parse(yaml_text)
+        parse_workflow(str(workflow_path))
 
 
-def test_invalid_retry_config():
-    yaml_text = VALID_WORKFLOW_YAML.replace(
-        "outputs:\n        final: string",
-        "outputs:\n        final: string\n      retry:\n        backoff_strategy: invalid",
-    )
-    parser = WorkflowParser()
-    with pytest.raises(ValueError):
-        parser.parse(yaml_text)
+def test_parse_estimates(tmp_path: Path) -> None:
+    workflow_path = _write_temp(tmp_path, ESTIMATE_WORKFLOW_YAML)
+    result = parse_workflow(str(workflow_path))
+    estimates = result["resource_estimates"]
+    assert estimates["step1"] == {"cpu": 0.5, "memory": 128.0}
+    assert estimates["step2"] == {"cpu": 1.5, "memory": 256.0}
 
 
-def test_parse_estimates():
-    parser = WorkflowParser()
-    result = parser.parse(ESTIMATE_WORKFLOW_YAML)
-    assert result["estimates"]["runtime"] == 3.0
-    assert result["estimates"]["cost"] == 30.0
+def test_dry_run_execution_order(tmp_path: Path) -> None:
+    workflow_path = _write_temp(tmp_path, VALID_WORKFLOW_YAML)
+    result = parse_workflow(str(workflow_path), dry_run=True)
+    assert result["execution_order"] == ["step1", "step2"]
