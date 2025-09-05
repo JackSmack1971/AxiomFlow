@@ -74,6 +74,42 @@ VALID_WORKFLOW_JSON = """
 }
 """
 
+ESTIMATE_WORKFLOW_YAML = """
+workflow:
+  name: estimate-workflow
+  version: "1.0.0"
+  inputs: []
+  personas:
+    - id: dev
+      name: Developer
+      role: coder
+      capabilities: [code]
+  steps:
+    - id: step1
+      name: Step One
+      persona: dev
+      action: run
+      inputs: {}
+      outputs:
+        result: string
+      estimated_runtime: 1.0
+      estimated_cost: 10.0
+    - id: step2
+      name: Step Two
+      persona: dev
+      action: run
+      inputs:
+        prev_result: step1.result
+      outputs:
+        final: string
+      estimated_runtime: 2.0
+      estimated_cost: 20.0
+  edges:
+    - from: step1
+      to: step2
+  gates: []
+"""
+
 
 def test_parse_yaml_workflow():
     parser = WorkflowParser()
@@ -132,3 +168,10 @@ def test_invalid_retry_config():
     parser = WorkflowParser()
     with pytest.raises(ValueError):
         parser.parse(yaml_text)
+
+
+def test_parse_estimates():
+    parser = WorkflowParser()
+    result = parser.parse(ESTIMATE_WORKFLOW_YAML)
+    assert result["estimates"]["runtime"] == 3.0
+    assert result["estimates"]["cost"] == 30.0
