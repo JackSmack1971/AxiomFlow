@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
+import os
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +56,7 @@ class AgentRouter:
         self._use_ml = True
         self._metrics_path = Path(metrics_path) if metrics_path else None
         self._metrics: Dict[str, Dict[str, int]] = {}
+        self._write_lock = asyncio.Lock()
         if self._metrics_path and self._metrics_path.exists():
             try:
                 self._metrics = json.loads(self._metrics_path.read_text())
@@ -144,9 +148,17 @@ class AgentRouter:
             if inspect.isawaitable(res):
                 await res
         if self._metrics_path:
-            entry = self._metrics.setdefault(agent["id"], {"success": 0, "failure": 0})
-            if success:
-                entry["success"] += 1
-            else:
-                entry["failure"] += 1
-            self._metrics_path.write_text(json.dumps(self._metrics))
+            async with self._write_lock:
+                entry = self._metrics.setdefault(
+                    agent["id"], {"success": 0, "failure": 0}
+                )
+                if success:
+                    entry["success"] += 1
+                else:
+                    entry["failure"] += 1
+                data = json.dumps(self._metrics)
+                tmp_dir = self._metrics_path.parent
+                with tempfile.NamedTemporaryFile("w", delete=False, dir=tmp_dir) as tf:
+                    tf.write(data)
+                    tmp_name = tf.name
+                os.replace(tmp_name, self._metrics_path)
