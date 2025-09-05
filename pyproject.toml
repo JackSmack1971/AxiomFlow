@@ -16,6 +16,9 @@ dependencies = [
     "redis>=6.4.0",
 ]
 
+[project.scripts]
+axiomflow = "axiomflow.cli.init:cli"
+
 [dependency-groups]
 dev = [
     "bandit>=1.8.6",
