@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Dict, List
 from unittest.mock import AsyncMock
@@ -163,3 +164,21 @@ async def test_model_adapts_after_feedback(tmp_path):
     data = json.loads(metrics_file.read_text())
     assert data[first["id"]]["failure"] == 1
     assert data[second["id"]]["success"] == 1
+
+
+async def test_record_outcome_concurrent_writes(tmp_path):
+    ml_model = AsyncMock()
+    ml_model.update = AsyncMock()
+    metrics_file = tmp_path / "metrics.json"
+    router = AgentRouter(ml_model, metrics_path=metrics_file)
+    agent = {
+        "id": "agent_a",
+        "skills": {"python"},
+        "load": 0.1,
+        "policies": set(),
+        "status": "available",
+    }
+    task = {"required_skill": "python"}
+    await asyncio.gather(*[router.record_outcome(task, agent, True) for _ in range(20)])
+    data = json.loads(metrics_file.read_text())
+    assert data[agent["id"]]["success"] == 20
