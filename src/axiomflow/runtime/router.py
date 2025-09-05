@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import inspect
+import json
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from axiomflow.logging import request_id_var
@@ -41,12 +44,20 @@ class AgentRouter:
         ml_model: Any,
         *,
         metrics_hook: Optional[Callable[[float], None]] = None,
+        metrics_path: Optional[str] = None,
     ) -> None:
         self._ml_model = ml_model
         self._metrics_hook = metrics_hook
         self._cb_threshold = 3
         self._failure_count = 0
         self._use_ml = True
+        self._metrics_path = Path(metrics_path) if metrics_path else None
+        self._metrics: Dict[str, Dict[str, int]] = {}
+        if self._metrics_path and self._metrics_path.exists():
+            try:
+                self._metrics = json.loads(self._metrics_path.read_text())
+            except Exception:  # pragma: no cover - corrupt metrics
+                self._metrics = {}
 
     async def route_task(
         self,
@@ -117,3 +128,25 @@ class AgentRouter:
             scores.append((score, agent))
         scores.sort(key=lambda x: x[0], reverse=True)
         return scores[0][1]
+
+    async def record_outcome(
+        self, task: Dict[str, Any], agent: Dict[str, Any], success: bool
+    ) -> None:
+        """Record the result of a routed task and update learning state."""
+        features = {
+            "agent_id": agent["id"],
+            "task": task,
+            "result": success,
+        }
+        update = getattr(self._ml_model, "update", None)
+        if update:
+            res = update(features)
+            if inspect.isawaitable(res):
+                await res
+        if self._metrics_path:
+            entry = self._metrics.setdefault(agent["id"], {"success": 0, "failure": 0})
+            if success:
+                entry["success"] += 1
+            else:
+                entry["failure"] += 1
+            self._metrics_path.write_text(json.dumps(self._metrics))

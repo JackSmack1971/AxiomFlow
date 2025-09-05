@@ -1,13 +1,11 @@
-from typing import List
+import json
+from typing import Dict, List
 from unittest.mock import AsyncMock
 
 import pytest
 
-from axiomflow.runtime.router import (
-    AgentRouter,
-    NoAgentsAvailableError,
-    PolicyViolationError,
-)
+from axiomflow.runtime.router import (AgentRouter, NoAgentsAvailableError,
+                                      PolicyViolationError)
 
 pytestmark = pytest.mark.anyio
 
@@ -117,3 +115,51 @@ async def test_routing_accuracy(agents):
         elif t["required_skill"] == "ml" and result["id"] == "agent_ml":
             correct += 1
     assert correct / len(tasks) >= 0.95
+
+
+async def test_model_adapts_after_feedback(tmp_path):
+    class SimpleModel:
+        def __init__(self) -> None:
+            self.stats: Dict[str, Dict[str, int]] = {}
+
+        async def score(self, features):
+            stat = self.stats.get(features["agent_id"], {"success": 0, "total": 0})
+            return (stat["success"] + 1) / (stat["total"] + 2)
+
+        async def update(self, features):
+            stat = self.stats.setdefault(
+                features["agent_id"], {"success": 0, "total": 0}
+            )
+            stat["total"] += 1
+            if features["result"]:
+                stat["success"] += 1
+
+    agents = [
+        {
+            "id": "agent_a",
+            "skills": {"python"},
+            "load": 0.2,
+            "policies": set(),
+            "status": "available",
+        },
+        {
+            "id": "agent_b",
+            "skills": {"python"},
+            "load": 0.2,
+            "policies": set(),
+            "status": "available",
+        },
+    ]
+    metrics_file = tmp_path / "metrics.json"
+    router = AgentRouter(SimpleModel(), metrics_path=metrics_file)
+    task = {"required_skill": "python"}
+    first = await router.route_task(task, agents)
+    await router.record_outcome(task, first, False)
+    second = await router.route_task(task, agents)
+    await router.record_outcome(task, second, True)
+    third = await router.route_task(task, agents)
+    assert second["id"] != first["id"]
+    assert third["id"] == second["id"]
+    data = json.loads(metrics_file.read_text())
+    assert data[first["id"]]["failure"] == 1
+    assert data[second["id"]]["success"] == 1
